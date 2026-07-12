@@ -1,24 +1,30 @@
 {
   "manifest_version": 3,
-  "name": "Existation Jira",
-  "description": "Side panel for current Jira issues.",
+  "name": "Jira: боковая панель",
+  "description": "Текущие задачи, недавние, избранное, уведомления и списание времени — в боковой панели Chrome.",
   "version": "0.1.0",
   "action": {
-    "default_title": "Existation Jira"
+    "default_title": "Jira: боковая панель"
   },
   "background": {
     "service_worker": "assets/background.js",
     "type": "module"
   },
-  "permissions": ["alarms", "storage", "sidePanel", "tabs"],
-  "host_permissions": ["<all_urls>"],
+  "permissions": [
+    "alarms",
+    "storage",
+    "sidePanel",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "side_panel": {
     "default_path": "sidepanel.html"
   },
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",
-    "48": "icons/icon-48.png",
-    "128": "icons/icon-128.png"
+    "96": "icons/icon-96.png"
   }
 }

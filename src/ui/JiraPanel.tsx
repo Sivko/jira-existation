@@ -88,7 +88,6 @@ export function JiraPanel() {
       <header className="sticky top-0 z-10 border-b border-line bg-white">
         <div className="flex items-center justify-between px-4 py-3">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-brand">Existation</p>
             <h1 className="text-lg font-semibold text-ink">Jira задачи</h1>
           </div>
           {settings ? (
@@ -114,6 +113,8 @@ export function JiraPanel() {
         <AuthForm
           initialSettings={settings}
           onCancel={settings ? () => setEditing(false) : undefined}
+          isResetting={resetMutation.isPending}
+          onReset={settings ? () => resetMutation.mutate() : undefined}
           onSaved={async () => {
             setEditing(false);
             await queryClient.invalidateQueries({ queryKey: ["settings"] });
@@ -122,14 +123,6 @@ export function JiraPanel() {
       ) : (
         <section className="p-4">
           <IssueTab activeTab={activeTab} settings={settings} />
-          <button
-            className="mt-4 inline-flex h-9 items-center gap-2 rounded-md border border-line bg-white px-3 text-sm font-medium text-muted hover:text-ink"
-            type="button"
-            onClick={() => resetMutation.mutate()}
-          >
-            <Trash2 size={16} />
-            Сбросить авторизацию
-          </button>
         </section>
       )}
     </main>
@@ -156,9 +149,8 @@ function Tabs({
     <nav className="grid grid-cols-4 border-t border-line px-2 pt-2">
       {tabs.map((tab) => (
         <button
-          className={`flex h-10 items-center justify-center gap-1 border-b-2 px-1 text-xs font-medium ${
-            activeTab === tab.id ? "border-brand text-brand" : "border-transparent text-muted hover:text-ink"
-          }`}
+          className={`flex h-10 items-center justify-center gap-1 border-b-2 px-1 text-xs font-medium ${activeTab === tab.id ? "border-brand text-brand" : "border-transparent text-muted hover:text-ink"
+            }`}
           key={tab.id}
           type="button"
           onClick={() => onChange(tab.id)}
@@ -177,11 +169,13 @@ function Tabs({
 
 type AuthFormProps = {
   initialSettings: JiraSettings | null;
+  isResetting?: boolean;
   onCancel?: () => void;
+  onReset?: () => void;
   onSaved: () => void;
 };
 
-function AuthForm({ initialSettings, onCancel, onSaved }: AuthFormProps) {
+function AuthForm({ initialSettings, isResetting = false, onCancel, onReset, onSaved }: AuthFormProps) {
   const [baseUrl, setBaseUrl] = useState(initialSettings?.baseUrl ?? "");
   const [username, setUsername] = useState(initialSettings?.username ?? "");
   const [token, setToken] = useState(initialSettings?.token ?? "");
@@ -245,18 +239,29 @@ function AuthForm({ initialSettings, onCancel, onSaved }: AuthFormProps) {
         </p>
       ) : null}
 
-      <div className="flex items-center justify-between gap-2">
-        {onCancel ? (
-          <button
-            className="h-10 rounded-md border border-line bg-white px-3 text-sm font-medium text-muted hover:text-ink"
-            type="button"
-            onClick={onCancel}
-          >
-            Отмена
-          </button>
-        ) : (
-          <span />
-        )}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {onCancel ? (
+            <button
+              className="h-10 rounded-md border border-line bg-white px-3 text-sm font-medium text-muted hover:text-ink"
+              type="button"
+              onClick={onCancel}
+            >
+              Отмена
+            </button>
+          ) : null}
+          {onReset ? (
+            <button
+              className="inline-flex h-10 items-center gap-2 rounded-md border border-line bg-white px-3 text-sm font-medium text-muted hover:text-ink disabled:opacity-60"
+              disabled={isResetting}
+              type="button"
+              onClick={onReset}
+            >
+              <Trash2 size={16} />
+              Сбросить авторизацию
+            </button>
+          ) : null}
+        </div>
         <button
           className="inline-flex h-10 items-center gap-2 rounded-md bg-brand px-4 text-sm font-semibold text-white hover:bg-brand-dark disabled:opacity-60"
           disabled={saveMutation.isPending}
@@ -417,9 +422,8 @@ function StatusFilter({
     <div className="mb-3 overflow-x-auto pb-1">
       <div className="flex min-w-max gap-2">
         <button
-          className={`h-8 rounded-md border px-3 text-xs font-medium ${
-            activeStatus === "all" ? "border-brand bg-white text-brand" : "border-line bg-white text-muted hover:text-ink"
-          }`}
+          className={`h-8 rounded-md border px-3 text-xs font-medium ${activeStatus === "all" ? "border-brand bg-white text-brand" : "border-line bg-white text-muted hover:text-ink"
+            }`}
           type="button"
           onClick={() => onChange("all")}
         >
@@ -427,11 +431,10 @@ function StatusFilter({
         </button>
         {statuses.map((status) => (
           <button
-            className={`h-8 rounded-md border px-3 text-xs font-medium ${
-              activeStatus === status
+            className={`h-8 rounded-md border px-3 text-xs font-medium ${activeStatus === status
                 ? activeStatusToneByName[status] ?? "border-brand bg-white text-brand"
                 : `${statusToneByName[status] ?? "border-line bg-white text-muted"} hover:text-ink`
-            }`}
+              }`}
             key={status}
             type="button"
             onClick={() => onChange(status)}
@@ -617,9 +620,8 @@ function IssueCard({
       <div className="flex items-center justify-between gap-2 border-t border-line px-3 py-2" onClick={stopCardClick}>
         <div className="flex gap-1">
           <button
-            className={`grid h-8 w-8 place-items-center rounded-md border ${
-              favorite ? "border-amber-300 bg-amber-50 text-amber-600" : "border-line bg-white text-muted"
-            } hover:text-ink disabled:opacity-60`}
+            className={`grid h-8 w-8 place-items-center rounded-md border ${favorite ? "border-amber-300 bg-amber-50 text-amber-600" : "border-line bg-white text-muted"
+              } hover:text-ink disabled:opacity-60`}
             disabled={favoriteMutation.isPending}
             title={favorite ? "Убрать из избранного" : "Добавить в избранное"}
             type="button"
@@ -655,9 +657,8 @@ function TimerForm({ issue, settings }: { issue: StoredIssue; settings: JiraSett
       <div className="grid grid-cols-3 gap-2">
         {["1h", "2h", "4h"].map((value) => (
           <button
-            className={`h-8 rounded-md border text-sm font-medium ${
-              timeSpent === value ? "border-brand bg-white text-brand" : "border-line bg-white text-muted"
-            }`}
+            className={`h-8 rounded-md border text-sm font-medium ${timeSpent === value ? "border-brand bg-white text-brand" : "border-line bg-white text-muted"
+              }`}
             key={value}
             type="button"
             onClick={() => setTimeSpent(value)}

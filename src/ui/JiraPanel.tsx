@@ -15,6 +15,7 @@ import {
   getFavoriteIssues,
   getRecentIssues,
   getSettings,
+  hideActivityItem,
   isFavorite,
   JiraSettings,
   markActivityRead,
@@ -489,16 +490,19 @@ function ActivityTab({
   });
 
   const createActionMutation = useMutation({
-    mutationFn: () =>
-      createAction({
-        url: actionUrl,
+    mutationFn: async () => {
+      const normalizedActionUrl = toJiraIssueUrl(settings.baseUrl, actionUrl);
+      await createAction({
+        url: normalizedActionUrl,
         team: actionTeam,
         createdBy: settings.username,
         comment: actionComment
-      }),
-    onSuccess: async () => {
+      });
+      return normalizedActionUrl;
+    },
+    onSuccess: async (normalizedActionUrl) => {
       await saveActionDraft({
-        url: actionUrl,
+        url: normalizedActionUrl,
         team: actionTeam,
         timeSpent: actionTimeSpent,
         comment: actionComment,
@@ -551,9 +555,8 @@ function ActivityTab({
         <input
           className="h-9 w-full rounded-md border border-line bg-white px-3 text-sm outline-none focus:border-brand"
           disabled={!isSupabaseConfigured()}
-          placeholder="Ссылка на задачу Jira"
+          placeholder="Задача (ссылка или номер)"
           required
-          type="url"
           value={actionUrl}
           onChange={(event) => setActionUrl(event.target.value)}
         />
@@ -682,9 +685,16 @@ function ActivityCard({
         createdBy: settings.username
       });
       await queryClient.invalidateQueries({ queryKey: ["action-drafts"] });
+      await hideActivityItem(item.id);
+      await queryClient.invalidateQueries({ queryKey: ["activity"] });
     }
 
     await onStoredIssuesChanged();
+  }
+
+  async function handleHide() {
+    await hideActivityItem(item.id);
+    await queryClient.invalidateQueries({ queryKey: ["activity"] });
   }
 
   return (
@@ -726,6 +736,16 @@ function ActivityCard({
           {item.kind === "action" ? <Check size={15} /> : <Timer size={15} />}
           {item.kind === "action" ? "Аппрув" : "Timer"}
         </button>
+        {item.kind === "action" ? (
+          <button
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-line bg-white px-2 text-xs font-medium text-muted hover:text-ink"
+            type="button"
+            onClick={handleHide}
+          >
+            <X size={15} />
+            Скрыть
+          </button>
+        ) : null}
       </div>
       {timerOpen ? (
         <TimerForm
@@ -942,6 +962,17 @@ function normalizeTimeSpent(value: string): string {
   }
 
   return `${amount}${unit}`;
+}
+
+function toJiraIssueUrl(baseUrl: string, value: string): string {
+  const trimmed = value.trim();
+
+  try {
+    return new URL(trimmed).toString();
+  } catch {
+    const issueKey = /^\d+$/.test(trimmed) ? `DR-${trimmed}` : trimmed.toUpperCase();
+    return `${baseUrl.replace(/\/+$/, "")}/browse/${encodeURIComponent(issueKey)}`;
+  }
 }
 
 function formatDate(value: string): string {

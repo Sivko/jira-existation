@@ -60,6 +60,7 @@ function toActivityItem(action: ActionRecord, settings: JiraSettings): ActivityI
     {
       id: `supabase:action:${action.id}`,
       kind: "action",
+      team: action.team ?? undefined,
       baseUrl: settings.baseUrl,
       issueId: String(action.id),
       issueKey,

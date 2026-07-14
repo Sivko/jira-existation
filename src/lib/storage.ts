@@ -22,6 +22,7 @@ export type StoredIssue = {
 export type ActivityItem = {
   id: string;
   kind: "comment" | "assignment" | "action";
+  team?: string;
   baseUrl: string;
   issueId: string;
   issueKey: string;
@@ -48,6 +49,7 @@ const SETTINGS_KEY = "jira-settings";
 const RECENT_KEY = "jira-recent-issues";
 const FAVORITES_KEY = "jira-favorite-issues";
 const ACTIVITY_KEY = "jira-activity";
+const HIDDEN_ACTIVITY_KEY = "jira-hidden-activity";
 const ACTION_DRAFTS_KEY = "jira-action-drafts";
 const MAX_RECENT = 10;
 const MAX_ACTIVITY = 100;
@@ -89,16 +91,21 @@ export async function getFavoriteIssues(): Promise<StoredIssue[]> {
 }
 
 export async function getActivity(): Promise<ActivityItem[]> {
-  const value = await chrome.storage.local.get(ACTIVITY_KEY);
-  return sortActivity((value[ACTIVITY_KEY] as ActivityItem[] | undefined) ?? []);
+  const [activity, hiddenIds, settings] = await Promise.all([getRawActivity(), getHiddenActivityIds(), getSettings()]);
+  return sortActivity(
+    activity.filter((item) => !hiddenIds.includes(item.id) && isActivityVisibleForSettings(item, settings))
+  );
 }
 
 export async function upsertActivity(items: ActivityItem[]): Promise<ActivityItem[]> {
   const current = await getActivity();
-  const currentById = new Map(current.map((item) => [item.id, item]));
+  const hiddenIds = await getHiddenActivityIds();
+  const incomingActionIds = new Set(items.filter((item) => item.kind === "action").map((item) => item.id));
+  const currentVisibleItems = current.filter((item) => item.kind !== "action" || incomingActionIds.has(item.id));
+  const currentById = new Map(currentVisibleItems.map((item) => [item.id, item]));
   const mergedById = new Map<string, ActivityItem>();
 
-  for (const item of [...items, ...current]) {
+  for (const item of [...currentVisibleItems, ...items.filter((item) => !hiddenIds.includes(item.id))]) {
     const existing = currentById.get(item.id);
     mergedById.set(item.id, {
       ...item,
@@ -121,6 +128,18 @@ export async function markActivityRead(): Promise<ActivityItem[]> {
 export async function getUnreadActivityCount(): Promise<number> {
   const activity = await getActivity();
   return activity.filter((item) => !item.read).length;
+}
+
+export async function hideActivityItem(id: string): Promise<ActivityItem[]> {
+  const [activity, hiddenIds] = await Promise.all([getRawActivity(), getHiddenActivityIds()]);
+  const nextHiddenIds = hiddenIds.includes(id) ? hiddenIds : [id, ...hiddenIds];
+  const nextActivity = activity.filter((item) => item.id !== id);
+
+  await chrome.storage.local.set({
+    [HIDDEN_ACTIVITY_KEY]: nextHiddenIds,
+    [ACTIVITY_KEY]: nextActivity
+  });
+  return sortActivity(nextActivity);
 }
 
 export async function getActionDrafts(): Promise<ActionDraft[]> {
@@ -177,8 +196,40 @@ function sortIssues(issues: StoredIssue[]): StoredIssue[] {
   return [...issues].sort((left, right) => Date.parse(right.lastOpenedAt) - Date.parse(left.lastOpenedAt));
 }
 
+async function getRawActivity(): Promise<ActivityItem[]> {
+  const value = await chrome.storage.local.get(ACTIVITY_KEY);
+  return (value[ACTIVITY_KEY] as ActivityItem[] | undefined) ?? [];
+}
+
+async function getHiddenActivityIds(): Promise<string[]> {
+  const value = await chrome.storage.local.get(HIDDEN_ACTIVITY_KEY);
+  return (value[HIDDEN_ACTIVITY_KEY] as string[] | undefined) ?? [];
+}
+
 function sortActivity(items: ActivityItem[]): ActivityItem[] {
   return [...items].sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
+}
+
+function isActivityVisibleForSettings(item: ActivityItem, settings: JiraSettings | null): boolean {
+  if (item.kind !== "action" || !item.team) {
+    return true;
+  }
+
+  const actionTeams = parseTeams(item.team);
+
+  if (actionTeams.length === 0) {
+    return true;
+  }
+
+  const userTeams = parseTeams(settings?.teams);
+  return actionTeams.some((team) => userTeams.includes(team));
+}
+
+function parseTeams(value: string | null | undefined): string[] {
+  return (value ?? "")
+    .split(",")
+    .map((team) => team.trim().toLowerCase())
+    .filter(Boolean);
 }
 
 function sortActionDrafts(drafts: ActionDraft[]): ActionDraft[] {

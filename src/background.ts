@@ -1,5 +1,6 @@
 import { fetchActivity, fetchIssueByKey, toStoredIssue } from "./lib/jira";
 import { addRecentIssue, getSettings, getUnreadActivityCount, upsertActivity } from "./lib/storage";
+import { fetchActionActivity } from "./lib/supabase";
 
 const ACTIVITY_ALARM = "jira-activity-poll";
 
@@ -42,7 +43,7 @@ async function refreshActivity() {
     return;
   }
 
-  const activity = await fetchActivity(settings);
+  const activity = [...(await fetchActivity(settings)), ...(await fetchActionActivity(settings))];
   await upsertActivity(activity);
   await updateBadgeFromStorage();
 }

@@ -1,12 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ExternalLink, MessageSquare, RefreshCw, Save, Settings, Star, Timer, Trash2, UserCheck, X } from "lucide-react";
+import { Check, ClipboardCheck, ExternalLink, MessageSquare, Plus, RefreshCw, Save, Settings, Star, Timer, Trash2, UserCheck, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { FormEvent, MouseEvent, useEffect, useState } from "react";
 import { addWorklog, fetchActivity, fetchCurrentIssues, toStoredIssue } from "../lib/jira";
+import { createAction, fetchActionActivity, isSupabaseConfigured } from "../lib/supabase";
 import {
+  ActionDraft,
   ActivityItem,
   addRecentIssue,
   clearSettings,
+  getActionDrafts,
   defaultJql,
   getActivity,
   getFavoriteIssues,
@@ -15,6 +18,7 @@ import {
   isFavorite,
   JiraSettings,
   markActivityRead,
+  saveActionDraft,
   saveSettings,
   StoredIssue,
   toggleFavoriteIssue,
@@ -180,6 +184,7 @@ function AuthForm({ initialSettings, isResetting = false, onCancel, onReset, onS
   const [username, setUsername] = useState(initialSettings?.username ?? "");
   const [token, setToken] = useState(initialSettings?.token ?? "");
   const [jql, setJql] = useState(initialSettings?.jql ?? defaultJql);
+  const [teams, setTeams] = useState(initialSettings?.teams ?? "");
 
   const saveMutation = useMutation({
     mutationFn: saveSettings,
@@ -188,7 +193,7 @@ function AuthForm({ initialSettings, isResetting = false, onCancel, onReset, onS
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    saveMutation.mutate({ baseUrl, username, token, jql });
+    saveMutation.mutate({ baseUrl, username, token, jql, teams });
   }
 
   return (
@@ -230,6 +235,15 @@ function AuthForm({ initialSettings, isResetting = false, onCancel, onReset, onS
           className="min-h-24 w-full resize-y rounded-md border border-line bg-white px-3 py-2 text-sm outline-none focus:border-brand"
           value={jql}
           onChange={(event) => setJql(event.target.value)}
+        />
+      </Field>
+
+      <Field label="Команды">
+        <input
+          className="h-10 w-full rounded-md border border-line bg-white px-3 text-sm outline-none focus:border-brand"
+          placeholder="frontend, qa"
+          value={teams}
+          onChange={(event) => setTeams(event.target.value)}
         />
       </Field>
 
@@ -301,7 +315,7 @@ function IssueTab({ activeTab, settings }: { activeTab: TabId; settings: JiraSet
   });
 
   const refreshActivityMutation = useMutation({
-    mutationFn: async () => upsertActivity(await fetchActivity(settings)),
+    mutationFn: async () => upsertActivity([...(await fetchActivity(settings)), ...(await fetchActionActivity(settings))]),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["activity"] });
     }
@@ -346,6 +360,7 @@ function IssueTab({ activeTab, settings }: { activeTab: TabId; settings: JiraSet
         isRefreshing={refreshActivityMutation.isPending}
         settings={settings}
         onRefresh={() => refreshActivityMutation.mutate()}
+        onStoredIssuesChanged={invalidateStoredIssues}
       />
     );
   }
@@ -452,14 +467,68 @@ function ActivityTab({
   isLoading,
   isRefreshing,
   settings,
-  onRefresh
+  onRefresh,
+  onStoredIssuesChanged
 }: {
   activity: ActivityItem[];
   isLoading: boolean;
   isRefreshing: boolean;
   settings: JiraSettings;
   onRefresh: () => void;
+  onStoredIssuesChanged: () => Promise<void>;
 }) {
+  const queryClient = useQueryClient();
+  const [actionUrl, setActionUrl] = useState("");
+  const [actionTeam, setActionTeam] = useState("");
+  const [actionTimeSpent, setActionTimeSpent] = useState("1h");
+  const [actionComment, setActionComment] = useState("");
+
+  const actionDraftsQuery = useQuery({
+    queryKey: ["action-drafts"],
+    queryFn: getActionDrafts
+  });
+
+  const createActionMutation = useMutation({
+    mutationFn: () =>
+      createAction({
+        url: actionUrl,
+        team: actionTeam,
+        createdBy: settings.username,
+        comment: actionComment
+      }),
+    onSuccess: async () => {
+      await saveActionDraft({
+        url: actionUrl,
+        team: actionTeam,
+        timeSpent: actionTimeSpent,
+        comment: actionComment,
+        createdBy: settings.username
+      });
+      setActionUrl("");
+      setActionTeam("");
+      setActionTimeSpent("1h");
+      setActionComment("");
+      await queryClient.invalidateQueries({ queryKey: ["action-drafts"] });
+      await queryClient.invalidateQueries({ queryKey: ["activity"] });
+      await upsertActivity(await fetchActionActivity(settings));
+      await queryClient.invalidateQueries({ queryKey: ["activity"] });
+    }
+  });
+
+  function handleCreateAction(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    createActionMutation.mutate();
+  }
+
+  function fillFromDraft(draft: ActionDraft) {
+    setActionUrl(draft.url);
+    setActionTeam(draft.team ?? "");
+    setActionTimeSpent(draft.timeSpent);
+    setActionComment(draft.comment ?? "");
+  }
+
+  const ownDrafts = (actionDraftsQuery.data ?? []).filter((draft) => draft.createdBy === settings.username);
+
   return (
     <div>
       <div className="mb-3 flex items-center justify-between gap-3">
@@ -478,6 +547,74 @@ function ActivityTab({
         </button>
       </div>
 
+      <form className="mb-3 space-y-2 rounded-md border border-line bg-white p-3" onSubmit={handleCreateAction}>
+        <input
+          className="h-9 w-full rounded-md border border-line bg-white px-3 text-sm outline-none focus:border-brand"
+          disabled={!isSupabaseConfigured()}
+          placeholder="Ссылка на задачу Jira"
+          required
+          type="url"
+          value={actionUrl}
+          onChange={(event) => setActionUrl(event.target.value)}
+        />
+        <div className="grid grid-cols-[1fr_auto] gap-2">
+          <input
+            className="h-9 min-w-0 rounded-md border border-line bg-white px-3 text-sm outline-none focus:border-brand"
+            disabled={!isSupabaseConfigured()}
+            placeholder="Команда"
+            value={actionTeam}
+            onChange={(event) => setActionTeam(event.target.value)}
+          />
+          <button
+            className="inline-flex h-9 items-center gap-2 rounded-md bg-brand px-3 text-sm font-semibold text-white hover:bg-brand-dark disabled:opacity-60"
+            disabled={!isSupabaseConfigured() || createActionMutation.isPending || !actionUrl.trim()}
+            type="submit"
+          >
+            <Plus size={16} />
+            Создать
+          </button>
+        </div>
+        <input
+          className="h-9 w-full rounded-md border border-line bg-white px-3 text-sm outline-none focus:border-brand"
+          disabled={!isSupabaseConfigured()}
+          placeholder="Время"
+          value={actionTimeSpent}
+          onChange={(event) => setActionTimeSpent(event.target.value)}
+        />
+        <textarea
+          className="min-h-20 w-full resize-y rounded-md border border-line bg-white px-3 py-2 text-sm outline-none focus:border-brand"
+          disabled={!isSupabaseConfigured()}
+          placeholder="Комментарий"
+          value={actionComment}
+          onChange={(event) => setActionComment(event.target.value)}
+        />
+        {!isSupabaseConfigured() ? (
+          <p className="text-xs text-red-700">Supabase не настроен: нужен SUPABASE_URL или VITE_SUPABASE_URL.</p>
+        ) : null}
+        {createActionMutation.isError ? (
+          <p className="text-xs text-red-700">{(createActionMutation.error as Error).message}</p>
+        ) : null}
+      </form>
+
+      {ownDrafts.length > 0 ? (
+        <div className="mb-3 space-y-2">
+          {ownDrafts.slice(0, 3).map((draft) => (
+            <button
+              className="flex w-full items-center justify-between gap-2 rounded-md border border-line bg-white px-3 py-2 text-left text-xs text-muted hover:text-ink"
+              key={draft.id}
+              type="button"
+              onClick={() => fillFromDraft(draft)}
+            >
+              <span className="min-w-0">
+                <span className="block truncate font-medium text-ink">{draft.url}</span>
+                <span className="block truncate">{[draft.team, draft.timeSpent, draft.comment].filter(Boolean).join(" · ")}</span>
+              </span>
+              <span className="shrink-0 font-medium text-brand">Повторить</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       {isLoading ? (
         <EmptyState>Загружаю активность...</EmptyState>
       ) : activity.length === 0 ? (
@@ -485,7 +622,13 @@ function ActivityTab({
       ) : (
         <div className="space-y-2">
           {activity.map((item) => (
-            <ActivityCard item={item} key={item.id} settings={settings} />
+            <ActivityCard
+              actionDraft={findActionDraftForActivity(item, ownDrafts)}
+              item={item}
+              key={item.id}
+              settings={settings}
+              onStoredIssuesChanged={onStoredIssuesChanged}
+            />
           ))}
         </div>
       )}
@@ -493,9 +636,27 @@ function ActivityTab({
   );
 }
 
-function ActivityCard({ item, settings }: { item: ActivityItem; settings: JiraSettings }) {
+function findActionDraftForActivity(item: ActivityItem, drafts: ActionDraft[]): ActionDraft | undefined {
+  if (item.kind !== "action") {
+    return undefined;
+  }
+
+  return drafts.find((draft) => normalizeUrl(draft.url) === normalizeUrl(item.issueUrl));
+}
+
+function ActivityCard({
+  actionDraft,
+  item,
+  settings,
+  onStoredIssuesChanged
+}: {
+  actionDraft?: ActionDraft;
+  item: ActivityItem;
+  settings: JiraSettings;
+  onStoredIssuesChanged: () => Promise<void>;
+}) {
   const queryClient = useQueryClient();
-  const Icon = item.kind === "comment" ? MessageSquare : UserCheck;
+  const Icon = item.kind === "comment" ? MessageSquare : item.kind === "action" ? ClipboardCheck : UserCheck;
   const [timerOpen, setTimerOpen] = useState(false);
 
   async function handleOpen() {
@@ -509,6 +670,21 @@ function ActivityCard({ item, settings }: { item: ActivityItem; settings: JiraSe
     });
     await queryClient.invalidateQueries({ queryKey: ["recent"] });
     await openInCurrentTab(item.issueUrl);
+  }
+
+  async function handleTimerSuccess(timeSpent: string, comment: string) {
+    if (item.kind === "action") {
+      await saveActionDraft({
+        url: item.issueUrl,
+        team: actionDraft?.team,
+        timeSpent,
+        comment,
+        createdBy: settings.username
+      });
+      await queryClient.invalidateQueries({ queryKey: ["action-drafts"] });
+    }
+
+    await onStoredIssuesChanged();
   }
 
   return (
@@ -547,12 +723,14 @@ function ActivityCard({ item, settings }: { item: ActivityItem; settings: JiraSe
           type="button"
           onClick={() => setTimerOpen((value) => !value)}
         >
-          <Timer size={15} />
-          Timer
+          {item.kind === "action" ? <Check size={15} /> : <Timer size={15} />}
+          {item.kind === "action" ? "Аппрув" : "Timer"}
         </button>
       </div>
       {timerOpen ? (
         <TimerForm
+          initialComment={actionDraft?.comment}
+          initialTimeSpent={actionDraft?.timeSpent}
           issue={{
             baseUrl: item.baseUrl,
             id: item.issueId,
@@ -562,6 +740,7 @@ function ActivityCard({ item, settings }: { item: ActivityItem; settings: JiraSe
             lastOpenedAt: new Date().toISOString()
           }}
           settings={settings}
+          onSuccess={handleTimerSuccess}
         />
       ) : null}
     </article>
@@ -640,16 +819,30 @@ function IssueCard({
         </div>
       </div>
 
-      {timerOpen ? <TimerForm issue={issue} settings={settings} /> : null}
+      {timerOpen ? <TimerForm issue={issue} settings={settings} onSuccess={onStoredIssuesChanged} /> : null}
     </article>
   );
 }
 
-function TimerForm({ issue, settings }: { issue: StoredIssue; settings: JiraSettings }) {
-  const [timeSpent, setTimeSpent] = useState("1h");
+function TimerForm({
+  initialComment = "",
+  initialTimeSpent = "1h",
+  issue,
+  settings,
+  onSuccess
+}: {
+  initialComment?: string;
+  initialTimeSpent?: string;
+  issue: StoredIssue;
+  settings: JiraSettings;
+  onSuccess?: (timeSpent: string, comment: string) => Promise<void>;
+}) {
+  const [timeSpent, setTimeSpent] = useState(initialTimeSpent);
+  const [comment, setComment] = useState(initialComment);
 
   const worklogMutation = useMutation({
-    mutationFn: () => addWorklog(settings, issue.key, normalizeTimeSpent(timeSpent))
+    mutationFn: () => addWorklog(settings, issue.key, normalizeTimeSpent(timeSpent), comment),
+    onSuccess: () => onSuccess?.(normalizeTimeSpent(timeSpent), comment)
   });
 
   return (
@@ -684,6 +877,12 @@ function TimerForm({ issue, settings }: { issue: StoredIssue; settings: JiraSett
           <Check size={17} />
         </button>
       </div>
+      <textarea
+        className="min-h-20 w-full resize-y rounded-md border border-line bg-white px-3 py-2 text-sm outline-none focus:border-brand"
+        placeholder="Комментарий к списанию"
+        value={comment}
+        onChange={(event) => setComment(event.target.value)}
+      />
       {worklogMutation.isSuccess ? <p className="text-xs font-medium text-good">Время отправлено в Jira.</p> : null}
       {worklogMutation.isError ? (
         <p className="flex items-start gap-1.5 text-xs text-red-700">
@@ -752,6 +951,10 @@ function formatDate(value: string): string {
     hour: "2-digit",
     minute: "2-digit"
   }).format(new Date(value));
+}
+
+function normalizeUrl(value: string): string {
+  return value.trim().replace(/\/+$/, "").toLowerCase();
 }
 
 async function openInCurrentTab(url: string) {

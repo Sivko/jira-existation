@@ -163,14 +163,19 @@ export async function fetchAssignmentActivity(settings: JiraSettings): Promise<A
   );
 }
 
-export async function addWorklog(settings: JiraSettings, issueKey: string, timeSpent: string): Promise<void> {
+export async function addWorklog(settings: JiraSettings, issueKey: string, timeSpent: string, comment?: string): Promise<void> {
+  const body = {
+    timeSpent,
+    ...(comment?.trim() ? { comment: comment.trim() } : {})
+  };
+
   const response = await fetch(`${settings.baseUrl}/rest/api/2/issue/${encodeURIComponent(issueKey)}/worklog`, {
     method: "POST",
     headers: {
       ...authHeaders(settings),
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({ timeSpent })
+    body: JSON.stringify(body)
   });
 
   if (!response.ok) {

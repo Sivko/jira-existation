@@ -3,6 +3,7 @@ export type JiraSettings = {
   username: string;
   token: string;
   jql: string;
+  teams?: string;
 };
 
 export type StoredIssue = {
@@ -20,7 +21,7 @@ export type StoredIssue = {
 
 export type ActivityItem = {
   id: string;
-  kind: "comment" | "assignment";
+  kind: "comment" | "assignment" | "action";
   baseUrl: string;
   issueId: string;
   issueKey: string;
@@ -33,12 +34,24 @@ export type ActivityItem = {
   read: boolean;
 };
 
+export type ActionDraft = {
+  id: string;
+  url: string;
+  team?: string;
+  timeSpent: string;
+  comment?: string;
+  createdBy: string;
+  updatedAt: string;
+};
+
 const SETTINGS_KEY = "jira-settings";
 const RECENT_KEY = "jira-recent-issues";
 const FAVORITES_KEY = "jira-favorite-issues";
 const ACTIVITY_KEY = "jira-activity";
+const ACTION_DRAFTS_KEY = "jira-action-drafts";
 const MAX_RECENT = 10;
 const MAX_ACTIVITY = 100;
+const MAX_ACTION_DRAFTS = 20;
 
 export const defaultJql = "assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC";
 
@@ -110,6 +123,27 @@ export async function getUnreadActivityCount(): Promise<number> {
   return activity.filter((item) => !item.read).length;
 }
 
+export async function getActionDrafts(): Promise<ActionDraft[]> {
+  const value = await chrome.storage.local.get(ACTION_DRAFTS_KEY);
+  return sortActionDrafts((value[ACTION_DRAFTS_KEY] as ActionDraft[] | undefined) ?? []);
+}
+
+export async function saveActionDraft(draft: Omit<ActionDraft, "id" | "updatedAt">): Promise<ActionDraft[]> {
+  const current = await getActionDrafts();
+  const id = actionDraftId(draft.createdBy, draft.url, draft.team);
+  const next = [
+    {
+      ...draft,
+      id,
+      updatedAt: new Date().toISOString()
+    },
+    ...current.filter((item) => item.id !== id)
+  ].slice(0, MAX_ACTION_DRAFTS);
+
+  await chrome.storage.local.set({ [ACTION_DRAFTS_KEY]: next });
+  return next;
+}
+
 export async function toggleFavoriteIssue(issue: StoredIssue): Promise<StoredIssue[]> {
   const current = await getFavoriteIssues();
   const exists = current.some((item) => item.key === issue.key && item.baseUrl === issue.baseUrl);
@@ -134,7 +168,8 @@ export function normalizeSettings(settings: JiraSettings): JiraSettings {
     baseUrl: normalizeBaseUrl(settings.baseUrl),
     username: settings.username.trim(),
     token: settings.token.trim(),
-    jql: settings.jql.trim() || defaultJql
+    jql: settings.jql.trim() || defaultJql,
+    teams: settings.teams?.trim()
   };
 }
 
@@ -144,4 +179,12 @@ function sortIssues(issues: StoredIssue[]): StoredIssue[] {
 
 function sortActivity(items: ActivityItem[]): ActivityItem[] {
   return [...items].sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
+}
+
+function sortActionDrafts(drafts: ActionDraft[]): ActionDraft[] {
+  return [...drafts].sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
+}
+
+function actionDraftId(createdBy: string, url: string, team: string | undefined): string {
+  return [createdBy.trim().toLowerCase(), url.trim().toLowerCase(), team?.trim().toLowerCase() ?? ""].join("|");
 }

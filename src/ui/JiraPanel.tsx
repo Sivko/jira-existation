@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ClipboardCheck, ExternalLink, MessageSquare, Plus, RefreshCw, Save, Settings, Star, Timer, Trash2, UserCheck, X } from "lucide-react";
+import { Activity, Check, ClipboardCheck, ExternalLink, History, ListTodo, MessageSquare, Plus, RefreshCw, Save, Settings, Star, Timer, Trash2, UserCheck, X, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { FormEvent, MouseEvent, useEffect, useState } from "react";
 import { addWorklog, fetchActivity, fetchCurrentIssues, toStoredIssue } from "../lib/jira";
@@ -15,6 +15,7 @@ import {
   getFavoriteIssues,
   getRecentIssues,
   getSettings,
+  getUnreadActivityCount,
   hideActivityItem,
   isFavorite,
   JiraSettings,
@@ -66,7 +67,7 @@ export function JiraPanel() {
 
   useEffect(() => {
     const listener = (changes: Record<string, chrome.storage.StorageChange>, areaName: string) => {
-      if (areaName === "local" && changes["jira-activity"]) {
+      if (areaName === "local" && (changes["jira-activity"] || changes["jira-hidden-activity"])) {
         queryClient.invalidateQueries({ queryKey: ["activity"] });
       }
     };
@@ -143,31 +144,39 @@ function Tabs({
   unreadActivityCount: number;
   onChange: (tab: TabId) => void;
 }) {
-  const tabs: Array<{ id: TabId; label: string }> = [
-    { id: "current", label: "Текущие" },
-    { id: "recent", label: "Недавние" },
-    { id: "favorites", label: "Избранное" },
-    { id: "activity", label: "Активность" }
+  const tabs: Array<{ id: TabId; label: string; Icon: LucideIcon }> = [
+    { id: "current", label: "Текущие", Icon: ListTodo },
+    { id: "recent", label: "Недавние", Icon: History },
+    { id: "favorites", label: "Избранное", Icon: Star },
+    { id: "activity", label: "Активность", Icon: Activity }
   ];
 
   return (
     <nav className="grid grid-cols-4 border-t border-line px-2 pt-2">
-      {tabs.map((tab) => (
-        <button
-          className={`flex h-10 items-center justify-center gap-1 border-b-2 px-1 text-xs font-medium ${activeTab === tab.id ? "border-brand text-brand" : "border-transparent text-muted hover:text-ink"
-            }`}
-          key={tab.id}
-          type="button"
-          onClick={() => onChange(tab.id)}
-        >
-          <span className="truncate">{tab.label}</span>
-          {tab.id === "activity" && unreadActivityCount > 0 ? (
-            <span className="grid min-w-5 place-items-center rounded-full bg-brand px-1.5 text-[11px] font-semibold text-white">
-              {Math.min(unreadActivityCount, 99)}
-            </span>
-          ) : null}
-        </button>
-      ))}
+      {tabs.map((tab) => {
+        const isActive = activeTab === tab.id;
+        const Icon = tab.Icon;
+
+        return (
+          <button
+            aria-label={tab.label}
+            className={`flex h-10 items-center justify-center gap-1.5 border-b-2 px-1 text-xs font-medium ${isActive ? "border-brand text-brand" : "border-transparent text-muted hover:text-ink"
+              }`}
+            key={tab.id}
+            title={tab.label}
+            type="button"
+            onClick={() => onChange(tab.id)}
+          >
+            <Icon className="shrink-0" size={17} />
+            {isActive ? <span className="truncate">{tab.label}</span> : null}
+            {tab.id === "activity" && unreadActivityCount > 0 ? (
+              <span className="grid min-w-5 place-items-center rounded-full bg-brand px-1.5 text-[11px] font-semibold text-white">
+                {Math.min(unreadActivityCount, 99)}
+              </span>
+            ) : null}
+          </button>
+        );
+      })}
     </nav>
   );
 }
@@ -672,7 +681,7 @@ function ActivityCard({
       lastOpenedAt: new Date().toISOString()
     });
     await queryClient.invalidateQueries({ queryKey: ["recent"] });
-    await openInCurrentTab(item.issueUrl);
+    await openInNewTab(item.issueUrl);
   }
 
   async function handleTimerSuccess(timeSpent: string, comment: string) {
@@ -687,6 +696,7 @@ function ActivityCard({
       await queryClient.invalidateQueries({ queryKey: ["action-drafts"] });
       await hideActivityItem(item.id);
       await queryClient.invalidateQueries({ queryKey: ["activity"] });
+      await updateBadgeFromActivity();
     }
 
     await onStoredIssuesChanged();
@@ -695,6 +705,7 @@ function ActivityCard({
   async function handleHide() {
     await hideActivityItem(item.id);
     await queryClient.invalidateQueries({ queryKey: ["activity"] });
+    await updateBadgeFromActivity();
   }
 
   return (
@@ -790,7 +801,7 @@ function IssueCard({
   async function handleOpen() {
     await addRecentIssue(issue);
     await queryClient.invalidateQueries({ queryKey: ["recent"] });
-    await openInCurrentTab(issue.url);
+    await openInNewTab(issue.url);
   }
 
   function stopCardClick(event: MouseEvent) {
@@ -988,13 +999,12 @@ function normalizeUrl(value: string): string {
   return value.trim().replace(/\/+$/, "").toLowerCase();
 }
 
-async function openInCurrentTab(url: string) {
-  const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+async function updateBadgeFromActivity() {
+  const count = await getUnreadActivityCount();
+  await chrome.action.setBadgeBackgroundColor({ color: "#255bff" });
+  await chrome.action.setBadgeText({ text: count > 0 ? String(Math.min(count, 99)) : "" });
+}
 
-  if (activeTab?.id) {
-    await chrome.tabs.update(activeTab.id, { url });
-    return;
-  }
-
+async function openInNewTab(url: string) {
   await chrome.tabs.create({ url, active: true });
 }

@@ -30,7 +30,7 @@ chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName === "local" && changes["jira-activity"]) {
+  if (areaName === "local" && (changes["jira-activity"] || changes["jira-hidden-activity"])) {
     updateBadgeFromStorage().catch(() => undefined);
   }
 });

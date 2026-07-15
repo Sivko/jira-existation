@@ -5,6 +5,7 @@ export type ActionRecord = {
   created_at: string;
   url: string | null;
   team: string | null;
+  time_spent?: string | null;
   created_by: string | null;
   comment: string | null;
 };
@@ -12,6 +13,7 @@ export type ActionRecord = {
 export type NewAction = {
   url: string;
   team?: string;
+  timeSpent?: string;
   createdBy: string;
   comment?: string;
 };
@@ -33,17 +35,38 @@ export async function fetchActionActivity(settings: JiraSettings): Promise<Activ
 }
 
 export async function createAction(action: NewAction): Promise<ActionRecord> {
+  const body = {
+    url: action.url.trim(),
+    team: action.team?.trim() || null,
+    time_spent: action.timeSpent?.trim() || null,
+    created_by: action.createdBy.trim(),
+    comment: action.comment?.trim() || null
+  };
+
+  try {
+    return await createActionRequest(body);
+  } catch (error) {
+    if (!("time_spent" in body) || !isMissingColumnError(error, "time_spent")) {
+      throw error;
+    }
+
+    const bodyWithoutTimeSpent = {
+      url: body.url,
+      team: body.team,
+      created_by: body.created_by,
+      comment: body.comment
+    };
+    return createActionRequest(bodyWithoutTimeSpent);
+  }
+}
+
+async function createActionRequest(body: Record<string, string | null>): Promise<ActionRecord> {
   const [created] = await request<ActionRecord[]>("/rest/v1/actions", {
     method: "POST",
     headers: {
       Prefer: "return=representation"
     },
-    body: JSON.stringify({
-      url: action.url.trim(),
-      team: action.team?.trim() || null,
-      created_by: action.createdBy.trim(),
-      comment: action.comment?.trim() || null
-    })
+    body: JSON.stringify(body)
   });
 
   return created;
@@ -61,14 +84,16 @@ function toActivityItem(action: ActionRecord, settings: JiraSettings): ActivityI
       id: `supabase:action:${action.id}`,
       kind: "action",
       team: action.team ?? undefined,
+      timeSpent: action.time_spent?.trim() || undefined,
+      actionComment: action.comment?.trim() || undefined,
       baseUrl: settings.baseUrl,
       issueId: String(action.id),
       issueKey,
       issueSummary: action.comment?.trim() || "Глобальная задача",
       issueUrl: action.url ?? `${settings.baseUrl}/browse/${encodeURIComponent(issueKey)}`,
       author: action.created_by ?? undefined,
-      body: [action.comment, action.team ? `Команда: ${action.team}` : ""].filter(Boolean).join("\n"),
-      message: "Нужно затрекать время",
+      body: [action.comment, action.time_spent ? `Время: ${action.time_spent}` : "", action.team ? `Команда: ${action.team}` : ""].filter(Boolean).join("\n"),
+      message: "Инфо для трэка времени",
       createdAt: action.created_at,
       read: false
     }
@@ -147,4 +172,8 @@ async function errorMessage(response: Response): Promise<string> {
   } catch {
     return `Supabase returned HTTP ${response.status}`;
   }
+}
+
+function isMissingColumnError(error: unknown, column: string): boolean {
+  return error instanceof Error && error.message.toLowerCase().includes(column.toLowerCase());
 }

@@ -11,6 +11,7 @@ import {
   clearSettings,
   getActionDrafts,
   defaultJql,
+  deleteActionDraft,
   getActivity,
   getFavoriteIssues,
   getRecentIssues,
@@ -492,6 +493,7 @@ function ActivityTab({
   const [actionTeam, setActionTeam] = useState("");
   const [actionTimeSpent, setActionTimeSpent] = useState("1h");
   const [actionComment, setActionComment] = useState("");
+  const [actionFormOpen, setActionFormOpen] = useState(false);
 
   const actionDraftsQuery = useQuery({
     queryKey: ["action-drafts"],
@@ -504,6 +506,7 @@ function ActivityTab({
       await createAction({
         url: normalizedActionUrl,
         team: actionTeam,
+        timeSpent: actionTimeSpent,
         createdBy: settings.username,
         comment: actionComment
       });
@@ -538,6 +541,12 @@ function ActivityTab({
     setActionTeam(draft.team ?? "");
     setActionTimeSpent(draft.timeSpent);
     setActionComment(draft.comment ?? "");
+    setActionFormOpen(true);
+  }
+
+  async function handleDeleteDraft(id: string) {
+    await deleteActionDraft(id);
+    await queryClient.invalidateQueries({ queryKey: ["action-drafts"] });
   }
 
   const ownDrafts = (actionDraftsQuery.data ?? []).filter((draft) => draft.createdBy === settings.username);
@@ -560,69 +569,95 @@ function ActivityTab({
         </button>
       </div>
 
-      <form className="mb-3 space-y-2 rounded-md border border-line bg-white p-3" onSubmit={handleCreateAction}>
-        <input
-          className="h-9 w-full rounded-md border border-line bg-white px-3 text-sm outline-none focus:border-brand"
-          disabled={!isSupabaseConfigured()}
-          placeholder="Задача (ссылка или номер)"
-          required
-          value={actionUrl}
-          onChange={(event) => setActionUrl(event.target.value)}
-        />
-        <div className="grid grid-cols-[1fr_auto] gap-2">
+      <button
+        className="mb-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-line bg-white px-3 text-sm font-semibold text-ink hover:text-brand"
+        type="button"
+        onClick={() => setActionFormOpen((value) => !value)}
+      >
+        <Plus size={16} />
+        Информирование команды
+      </button>
+
+      {actionFormOpen ? (
+        <form className="mb-3 space-y-2 rounded-md border border-line bg-white p-3" onSubmit={handleCreateAction}>
           <input
-            className="h-9 min-w-0 rounded-md border border-line bg-white px-3 text-sm outline-none focus:border-brand"
+            className="h-9 w-full rounded-md border border-line bg-white px-3 text-sm outline-none focus:border-brand"
             disabled={!isSupabaseConfigured()}
-            placeholder="Команда"
-            value={actionTeam}
-            onChange={(event) => setActionTeam(event.target.value)}
+            placeholder="Задача (ссылка или номер)"
+            required
+            value={actionUrl}
+            onChange={(event) => setActionUrl(event.target.value)}
           />
-          <button
-            className="inline-flex h-9 items-center gap-2 rounded-md bg-brand px-3 text-sm font-semibold text-white hover:bg-brand-dark disabled:opacity-60"
-            disabled={!isSupabaseConfigured() || createActionMutation.isPending || !actionUrl.trim()}
-            type="submit"
-          >
-            <Plus size={16} />
-            Создать
-          </button>
-        </div>
-        <input
-          className="h-9 w-full rounded-md border border-line bg-white px-3 text-sm outline-none focus:border-brand"
-          disabled={!isSupabaseConfigured()}
-          placeholder="Время"
-          value={actionTimeSpent}
-          onChange={(event) => setActionTimeSpent(event.target.value)}
-        />
-        <textarea
-          className="min-h-20 w-full resize-y rounded-md border border-line bg-white px-3 py-2 text-sm outline-none focus:border-brand"
-          disabled={!isSupabaseConfigured()}
-          placeholder="Комментарий"
-          value={actionComment}
-          onChange={(event) => setActionComment(event.target.value)}
-        />
-        {!isSupabaseConfigured() ? (
-          <p className="text-xs text-red-700">Supabase не настроен: нужен SUPABASE_URL или VITE_SUPABASE_URL.</p>
-        ) : null}
-        {createActionMutation.isError ? (
-          <p className="text-xs text-red-700">{(createActionMutation.error as Error).message}</p>
-        ) : null}
-      </form>
+          <div className="grid grid-cols-[1fr_auto] gap-2">
+            <input
+              className="h-9 min-w-0 rounded-md border border-line bg-white px-3 text-sm outline-none focus:border-brand"
+              disabled={!isSupabaseConfigured()}
+              placeholder="Команда"
+              value={actionTeam}
+              onChange={(event) => setActionTeam(event.target.value)}
+            />
+            <button
+              className="inline-flex h-9 items-center gap-2 rounded-md bg-brand px-3 text-sm font-semibold text-white hover:bg-brand-dark disabled:opacity-60"
+              disabled={!isSupabaseConfigured() || createActionMutation.isPending || !actionUrl.trim()}
+              type="submit"
+            >
+              <Plus size={16} />
+              Создать
+            </button>
+          </div>
+          <input
+            className="h-9 w-full rounded-md border border-line bg-white px-3 text-sm outline-none focus:border-brand"
+            disabled={!isSupabaseConfigured()}
+            placeholder="Время"
+            value={actionTimeSpent}
+            onChange={(event) => setActionTimeSpent(event.target.value)}
+          />
+          <textarea
+            className="min-h-20 w-full resize-y rounded-md border border-line bg-white px-3 py-2 text-sm outline-none focus:border-brand"
+            disabled={!isSupabaseConfigured()}
+            placeholder="Комментарий"
+            value={actionComment}
+            onChange={(event) => setActionComment(event.target.value)}
+          />
+          {!isSupabaseConfigured() ? (
+            <p className="text-xs text-red-700">Supabase не настроен: нужен SUPABASE_URL или VITE_SUPABASE_URL.</p>
+          ) : null}
+          {createActionMutation.isError ? (
+            <p className="text-xs text-red-700">{(createActionMutation.error as Error).message}</p>
+          ) : null}
+        </form>
+      ) : null}
 
       {ownDrafts.length > 0 ? (
         <div className="mb-3 space-y-2">
           {ownDrafts.slice(0, 3).map((draft) => (
-            <button
-              className="flex w-full items-center justify-between gap-2 rounded-md border border-line bg-white px-3 py-2 text-left text-xs text-muted hover:text-ink"
+            <div
+              className="flex w-full items-center justify-between gap-2 rounded-md border border-line bg-white px-3 py-2 text-left text-xs text-muted"
               key={draft.id}
-              type="button"
-              onClick={() => fillFromDraft(draft)}
             >
               <span className="min-w-0">
                 <span className="block truncate font-medium text-ink">{draft.url}</span>
                 <span className="block truncate">{[draft.team, draft.timeSpent, draft.comment].filter(Boolean).join(" · ")}</span>
               </span>
-              <span className="shrink-0 font-medium text-brand">Повторить</span>
-            </button>
+              <span className="flex shrink-0 gap-1">
+                <button
+                  className="grid h-8 w-8 place-items-center rounded-md border border-line bg-white text-muted hover:text-brand"
+                  title="Повторить"
+                  type="button"
+                  onClick={() => fillFromDraft(draft)}
+                >
+                  <RefreshCw size={15} />
+                </button>
+                <button
+                  className="grid h-8 w-8 place-items-center rounded-md border border-line bg-white text-muted hover:text-red-700"
+                  title="Удалить"
+                  type="button"
+                  onClick={() => handleDeleteDraft(draft.id)}
+                >
+                  <Trash2 size={15} />
+                </button>
+              </span>
+            </div>
           ))}
         </div>
       ) : null}
@@ -688,7 +723,7 @@ function ActivityCard({
     if (item.kind === "action") {
       await saveActionDraft({
         url: item.issueUrl,
-        team: actionDraft?.team,
+        team: item.team ?? actionDraft?.team,
         timeSpent,
         comment,
         createdBy: settings.username
@@ -712,7 +747,11 @@ function ActivityCard({
     <article className={`rounded-md border bg-white p-3 ${item.read ? "border-line" : "border-brand/40"}`}>
       <button className="block w-full text-left" type="button" onClick={handleOpen}>
         <div className="flex items-start gap-3">
-          <div className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-md border border-line bg-paper text-muted">
+          <div
+            className={`mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-md border ${
+              item.kind === "action" ? "border-amber-200 bg-amber-50 text-amber-600" : "border-line bg-paper text-muted"
+            }`}
+          >
             <Icon size={16} />
           </div>
           <div className="min-w-0 flex-1">
@@ -749,19 +788,19 @@ function ActivityCard({
         </button>
         {item.kind === "action" ? (
           <button
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-line bg-white px-2 text-xs font-medium text-muted hover:text-ink"
+            className="grid h-8 w-8 place-items-center rounded-md border border-line bg-white text-muted hover:text-ink"
+            title="Скрыть"
             type="button"
             onClick={handleHide}
           >
             <X size={15} />
-            Скрыть
           </button>
         ) : null}
       </div>
       {timerOpen ? (
         <TimerForm
-          initialComment={actionDraft?.comment}
-          initialTimeSpent={actionDraft?.timeSpent}
+          initialComment={item.kind === "action" ? item.actionComment ?? actionDraft?.comment : actionDraft?.comment}
+          initialTimeSpent={item.kind === "action" ? item.timeSpent ?? actionDraft?.timeSpent : actionDraft?.timeSpent}
           issue={{
             baseUrl: item.baseUrl,
             id: item.issueId,

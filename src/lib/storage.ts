@@ -23,6 +23,8 @@ export type ActivityItem = {
   id: string;
   kind: "comment" | "assignment" | "action";
   team?: string;
+  timeSpent?: string;
+  actionComment?: string;
   baseUrl: string;
   issueId: string;
   issueKey: string;
@@ -158,6 +160,14 @@ export async function saveActionDraft(draft: Omit<ActionDraft, "id" | "updatedAt
     },
     ...current.filter((item) => item.id !== id)
   ].slice(0, MAX_ACTION_DRAFTS);
+
+  await chrome.storage.local.set({ [ACTION_DRAFTS_KEY]: next });
+  return next;
+}
+
+export async function deleteActionDraft(id: string): Promise<ActionDraft[]> {
+  const current = await getActionDrafts();
+  const next = current.filter((item) => item.id !== id);
 
   await chrome.storage.local.set({ [ACTION_DRAFTS_KEY]: next });
   return next;
